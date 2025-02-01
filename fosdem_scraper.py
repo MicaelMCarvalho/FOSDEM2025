@@ -4,12 +4,12 @@ from typing import Dict, List
 import concurrent.futures
 import time
 from datetime import datetime
-
+import os
+import math
 
 def get_soup(url: str) -> BeautifulSoup:
     response = requests.get(url)
     return BeautifulSoup(response.text, 'html.parser')
-
 
 def parse_event_details(event_url: str) -> Dict:
     try:
@@ -42,7 +42,6 @@ def scrape_fosdem_schedule() -> List[Dict]:
     current_track = None
 
     for row in soup.find_all('tr'):
-        # Check for track headers
         track_header = row.find('td', colspan='8')
         if track_header:
             current_track = track_header.h4.text.strip() if track_header.h4 else None
@@ -74,13 +73,11 @@ def scrape_fosdem_schedule() -> List[Dict]:
 
     return events
 
-
-def generate_markdown(events: List[Dict]) -> str:
+def generate_markdown_chunk(events: List[Dict], chunk_number: int, total_chunks: int) -> str:
     current_date = datetime.now().strftime("%Y-%m-%d")
 
-    md = f"# FOSDEM 2025 Schedule\n\n"
+    md = f"# FOSDEM 2025 Schedule - Part {chunk_number + 1} of {total_chunks}\n\n"
     md += f"*Generated on {current_date}*\n\n"
-    md += "## Table of Contents\n\n"
 
     # Group events by track
     tracks = {}
@@ -90,11 +87,12 @@ def generate_markdown(events: List[Dict]) -> str:
             tracks[track] = []
         tracks[track].append(event)
 
-    for track in tracks.keys():
-        track_anchor = track.lower().replace(' ', '-').replace('(', '').replace(')', '')
-        md += f"- [{track}](#{track_anchor})\n"
-
-    md += "\n"
+    if tracks:  # Only add table of contents if there are tracks
+        md += "## Table of Contents\n\n"
+        for track in tracks.keys():
+            track_anchor = track.lower().replace(' ', '-').replace('(', '').replace(')', '')
+            md += f"- [{track}](#{track_anchor})\n"
+        md += "\n"
 
     for track, track_events in tracks.items():
         md += f"## {track}\n\n"
@@ -125,19 +123,40 @@ def generate_markdown(events: List[Dict]) -> str:
 
     return md
 
+def save_schedule_in_chunks(events: List[Dict], chunk_size: int = 100):
+    # Create output directory if it doesn't exist
+    output_dir = "fosdem_schedule"
+    os.makedirs(output_dir, exist_ok=True)
 
-def save_schedule(markdown: str, filename: str = 'fosdem_2025_schedule.md'):
-    with open(filename, 'w', encoding='utf-8') as f:
-        f.write(markdown)
-    print(f"Schedule saved to {filename}")
+    # Calculate number of chunks
+    total_chunks = math.ceil(len(events) / chunk_size)
 
+    # Save complete schedule
+    complete_markdown = generate_markdown_chunk(events, 0, 1)
+    complete_filename = os.path.join(output_dir, 'fosdem_2025_schedule_complete.md')
+    with open(complete_filename, 'w', encoding='utf-8') as f:
+        f.write(complete_markdown)
+    print(f"Complete schedule saved to {complete_filename}")
+
+    # Save chunked schedules
+    for i in range(total_chunks):
+        start_idx = i * chunk_size
+        end_idx = min((i + 1) * chunk_size, len(events))
+        chunk_events = events[start_idx:end_idx]
+
+        chunk_markdown = generate_markdown_chunk(chunk_events, i, total_chunks)
+        chunk_filename = os.path.join(output_dir, f'fosdem_2025_schedule_part_{i+1}.md')
+
+        with open(chunk_filename, 'w', encoding='utf-8') as f:
+            f.write(chunk_markdown)
+        print(f"Part {i+1} saved to {chunk_filename}")
 
 if __name__ == "__main__":
     print("Starting FOSDEM schedule scraping...")
     start_time = time.time()
 
     events = scrape_fosdem_schedule()
-    markdown = generate_markdown(events)
-    save_schedule(markdown)
+    save_schedule_in_chunks(events)
 
-    print(f"Scraped {len(events)} events in {time.time() - start_time:.2f} seconds")
+    print(f"\nScraped {len(events)} events in {time.time() - start_time:.2f} seconds")
+    print(f"Files are saved in the 'fosdem_schedule' directory")
